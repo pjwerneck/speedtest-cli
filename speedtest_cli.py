@@ -354,6 +354,8 @@ def speedtest():
 
     signal.signal(signal.SIGINT, ctrl_c)
 
+    _result = {}
+
     description = (
         'Command line interface for testing internet bandwidth using '
         'speedtest.net.\n'
@@ -453,6 +455,8 @@ def speedtest():
             print_('Selecting best server based on ping...')
         best = getBestServer(servers)
 
+    _result['latency']  = '%(latency)s ms' % best
+
     if not args.simple:
         print_('Hosted by %(sponsor)s (%(name)s) [%(d)0.2f km]: '
                '%(latency)s ms' % best)
@@ -472,6 +476,8 @@ def speedtest():
         print_()
     print_('Download: %0.2f Mbit/s' % ((dlspeed / 1000 / 1000) * 8))
 
+    _result['download']  = '%0.2f Mbit/s' % ((dlspeed / 1000 / 1000) * 8)
+
     sizesizes = [int(.25 * 1000 * 1000), int(.5 * 1000 * 1000)]
     sizes = []
     for size in sizesizes:
@@ -483,6 +489,8 @@ def speedtest():
     if not args.simple:
         print_()
     print_('Upload: %0.2f Mbit/s' % ((ulspeed / 1000 / 1000) * 8))
+
+    _result['upload']  = '%0.2f Mbit/s' % ((ulspeed / 1000 / 1000) * 8)
 
     if args.share and args.mini:
         print_('Cannot generate a speedtest.net share results image while '
@@ -525,6 +533,8 @@ def speedtest():
 
         print_('Share results: http://www.speedtest.net/result/%s.png' %
                resultid[0])
+
+    return _result
 
 
 def main():
