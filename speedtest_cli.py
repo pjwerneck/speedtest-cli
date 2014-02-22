@@ -15,10 +15,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-try:
-    from urllib2 import urlopen, Request
-except ImportError:
-    from urllib.request import urlopen, Request
+__version__ = '0.2.5'
+
+# Some global variables we use
+source = None
+shutdown_event = None
 
 import math
 import time
@@ -27,7 +28,25 @@ import sys
 import threading
 import re
 import signal
-from xml.dom import minidom as DOM
+import socket
+
+# Used for bound_interface
+socket_socket = socket.socket
+
+try:
+    import xml.etree.cElementTree as ET
+except ImportError:
+    try:
+        import xml.etree.ElementTree as ET
+    except ImportError:
+        from xml.dom import minidom as DOM
+        ET = None
+
+# Begin import game to handle Python 2 and Python 3
+try:
+    from urllib2 import urlopen, Request, HTTPError, URLError
+except ImportError:
+    from urllib.request import urlopen, Request, HTTPError, URLError
 
 try:
     from Queue import Queue
@@ -114,6 +133,15 @@ else:
     del builtins
 
 
+def bound_socket(*args, **kwargs):
+    """Bind socket to a specified source IP address"""
+
+    global source
+    sock = socket_socket(*args, **kwargs)
+    sock.bind((source, 0))
+    return sock
+
+
 def distance(origin, destination):
     """Determine distance between 2 sets of [lat,lon] in km"""
 
@@ -121,8 +149,8 @@ def distance(origin, destination):
     lat2, lon2 = destination
     radius = 6371  # km
 
-    dlat = math.radians(lat2-lat1)
-    dlon = math.radians(lon2-lon1)
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
     a = (math.sin(dlat / 2) * math.sin(dlat / 2) + math.cos(math.radians(lat1))
          * math.cos(math.radians(lat2)) * math.sin(dlon / 2)
          * math.sin(dlon / 2))
@@ -133,6 +161,8 @@ def distance(origin, destination):
 
 
 class FileGetter(threading.Thread):
+    """Thread class for retrieving a URL"""
+
     def __init__(self, url, start):
         self.url = url
         self.result = None
@@ -144,7 +174,7 @@ class FileGetter(threading.Thread):
         try:
             if (time.time() - self.starttime) <= 10:
                 f = urlopen(self.url)
-                while 1 and not shutdown_event.is_set():
+                while 1 and not shutdown_event.isSet():
                     self.result.append(len(f.read(10240)))
                     if self.result[-1] == 0:
                         break
@@ -154,6 +184,8 @@ class FileGetter(threading.Thread):
 
 
 def downloadSpeed(files, quiet=False):
+    """Function to launch FileGetter threads and calculate download speeds"""
+
     start = time.time()
 
     def producer(q, files):
@@ -161,7 +193,7 @@ def downloadSpeed(files, quiet=False):
             thread = FileGetter(file, start)
             thread.start()
             q.put(thread, True)
-            if not quiet and not shutdown_event.is_set():
+            if not quiet and not shutdown_event.isSet():
                 sys.stdout.write('.')
                 sys.stdout.flush()
 
@@ -170,7 +202,7 @@ def downloadSpeed(files, quiet=False):
     def consumer(q, total_files):
         while len(finished) < total_files:
             thread = q.get(True)
-            while thread.is_alive():
+            while thread.isAlive():
                 thread.join(timeout=0.1)
             finished.append(sum(thread.result))
             del thread
@@ -181,19 +213,21 @@ def downloadSpeed(files, quiet=False):
     start = time.time()
     prod_thread.start()
     cons_thread.start()
-    while prod_thread.is_alive():
+    while prod_thread.isAlive():
         prod_thread.join(timeout=0.1)
-    while cons_thread.is_alive():
+    while cons_thread.isAlive():
         cons_thread.join(timeout=0.1)
-    return (sum(finished)/(time.time()-start))
+    return (sum(finished) / (time.time() - start))
 
 
 class FilePutter(threading.Thread):
+    """Thread class for putting a URL"""
+
     def __init__(self, url, start, size):
         self.url = url
         chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
         data = chars * (int(round(int(size) / 36.0)))
-        self.data = ('content1=%s' % data[0:int(size)-9]).encode()
+        self.data = ('content1=%s' % data[0:int(size) - 9]).encode()
         del data
         self.result = None
         self.starttime = start
@@ -202,7 +236,7 @@ class FilePutter(threading.Thread):
     def run(self):
         try:
             if ((time.time() - self.starttime) <= 10 and
-                    not shutdown_event.is_set()):
+                    not shutdown_event.isSet()):
                 f = urlopen(self.url, self.data)
                 f.read(11)
                 f.close()
@@ -214,6 +248,8 @@ class FilePutter(threading.Thread):
 
 
 def uploadSpeed(url, sizes, quiet=False):
+    """Function to launch FilePutter threads and calculate upload speeds"""
+
     start = time.time()
 
     def producer(q, sizes):
@@ -221,7 +257,7 @@ def uploadSpeed(url, sizes, quiet=False):
             thread = FilePutter(url, start, size)
             thread.start()
             q.put(thread, True)
-            if not quiet and not shutdown_event.is_set():
+            if not quiet and not shutdown_event.isSet():
                 sys.stdout.write('.')
                 sys.stdout.flush()
 
@@ -230,7 +266,7 @@ def uploadSpeed(url, sizes, quiet=False):
     def consumer(q, total_sizes):
         while len(finished) < total_sizes:
             thread = q.get(True)
-            while thread.is_alive():
+            while thread.isAlive():
                 thread.join(timeout=0.1)
             finished.append(thread.result)
             del thread
@@ -241,14 +277,20 @@ def uploadSpeed(url, sizes, quiet=False):
     start = time.time()
     prod_thread.start()
     cons_thread.start()
-    while prod_thread.is_alive():
+    while prod_thread.isAlive():
         prod_thread.join(timeout=0.1)
-    while cons_thread.is_alive():
+    while cons_thread.isAlive():
         cons_thread.join(timeout=0.1)
-    return (sum(finished)/(time.time()-start))
+    return (sum(finished) / (time.time() - start))
 
 
 def getAttributesByTagName(dom, tagName):
+    """Retrieve an attribute from an XML document and return it in a
+    consistent format
+
+    Only used with xml.dom.minidom, which is likely only to be used
+    with python versions older than 2.5
+    """
     elem = dom.getElementsByTagName(tagName)[0]
     return dict(list(elem.attributes.items()))
 
@@ -259,18 +301,30 @@ def getConfig():
     """
 
     uh = urlopen('http://www.speedtest.net/speedtest-config.php')
-    configxml = uh.read()
+    configxml = []
+    while 1:
+        configxml.append(uh.read(10240))
+        if len(configxml[-1]) == 0:
+            break
     if int(uh.code) != 200:
         return None
     uh.close()
-    root = DOM.parseString(configxml)
-    config = {
-        'client': getAttributesByTagName(root, 'client'),
-        'times': getAttributesByTagName(root, 'times'),
-        'download': getAttributesByTagName(root, 'download'),
-        'upload': getAttributesByTagName(root, 'upload')}
-
+    try:
+        root = ET.fromstring(''.encode().join(configxml))
+        config = {
+            'client': root.find('client').attrib,
+            'times': root.find('times').attrib,
+            'download': root.find('download').attrib,
+            'upload': root.find('upload').attrib}
+    except AttributeError:
+        root = DOM.parseString(''.join(configxml))
+        config = {
+            'client': getAttributesByTagName(root, 'client'),
+            'times': getAttributesByTagName(root, 'times'),
+            'download': getAttributesByTagName(root, 'download'),
+            'upload': getAttributesByTagName(root, 'upload')}
     del root
+    del configxml
     return config
 
 
@@ -280,14 +334,26 @@ def closestServers(client, all=False):
     """
 
     uh = urlopen('http://www.speedtest.net/speedtest-servers.php')
-    serversxml = uh.read()
+    serversxml = []
+    while 1:
+        serversxml.append(uh.read(10240))
+        if len(serversxml[-1]) == 0:
+            break
     if int(uh.code) != 200:
         return None
     uh.close()
-    root = DOM.parseString(serversxml)
+    try:
+        root = ET.fromstring(''.encode().join(serversxml))
+        elements = root.getiterator('server')
+    except AttributeError:
+        root = DOM.parseString(''.join(serversxml))
+        elements = root.getElementsByTagName('server')
     servers = {}
-    for server in root.getElementsByTagName('server'):
-        attrib = dict(list(server.attributes.items()))
+    for server in elements:
+        try:
+            attrib = server.attrib
+        except AttributeError:
+            attrib = dict(list(server.attributes.items()))
         d = distance([float(client['lat']), float(client['lon'])],
                      [float(attrib.get('lat')), float(attrib.get('lon'))])
         attrib['d'] = d
@@ -296,6 +362,8 @@ def closestServers(client, all=False):
         else:
             servers[d].append(attrib)
     del root
+    del serversxml
+    del elements
 
     closest = []
     for d in sorted(servers.keys()):
@@ -321,7 +389,11 @@ def getBestServer(servers):
         cum = []
         url = os.path.dirname(server['url'])
         for i in range(0, 3):
-            uh = urlopen('%s/latency.txt' % url)
+            try:
+                uh = urlopen('%s/latency.txt' % url)
+            except (HTTPError, URLError):
+                cum.append(3600)
+                continue
             start = time.time()
             text = uh.read(9)
             total = time.time() - start
@@ -341,15 +413,25 @@ def getBestServer(servers):
 
 
 def ctrl_c(signum, frame):
+    """Catch Ctrl-C key sequence and set a shutdown_event for our threaded
+    operations
+    """
+
     global shutdown_event
     shutdown_event.set()
     raise SystemExit('\nCancelling...')
 
 
+def version():
+    """Print the version"""
+
+    raise SystemExit(__version__)
+
+
 def speedtest():
     """Run the full speedtest.net test"""
 
-    global shutdown_event
+    global shutdown_event, source
     shutdown_event = threading.Event()
 
     signal.signal(signal.SIGINT, ctrl_c)
@@ -364,6 +446,8 @@ def speedtest():
         'https://github.com/sivel/speedtest-cli')
 
     parser = ArgParser(description=description)
+    # Give optparse.OptionParser an `add_argument` method for
+    # compatibility with argparse.ArgumentParser
     try:
         parser.add_argument = parser.add_option
     except AttributeError:
@@ -379,6 +463,9 @@ def speedtest():
                              'sorted by distance')
     parser.add_argument('--server', help='Specify a server ID to test against')
     parser.add_argument('--mini', help='URL of the Speedtest Mini server')
+    parser.add_argument('--source', help='Source IP address to bind to')
+    parser.add_argument('--version', action='store_true',
+                        help='Show the version number and exit')
 
     options = parser.parse_args()
     if isinstance(options, tuple):
@@ -387,9 +474,22 @@ def speedtest():
         args = options
     del options
 
+    # Print the version and exit
+    if args.version:
+        version()
+
+    # If specified bind to a specific IP address
+    if args.source:
+        source = args.source
+        socket.socket = bound_socket
+
     if not args.simple:
         print_('Retrieving speedtest.net configuration...')
-    config = getConfig()
+    try:
+        config = getConfig()
+    except URLError:
+        print_('Cannot retrieve speedtest configuration')
+        sys.exit(1)
 
     if not args.simple:
         print_('Retrieving speedtest.net server list...')
@@ -401,8 +501,14 @@ def speedtest():
                 line = ('%(id)4s) %(sponsor)s (%(name)s, %(country)s) '
                         '[%(d)0.2f km]' % server)
                 serverList.append(line)
+            # Python 2.7 and newer seem to be ok with the resultant encoding
+            # from parsing the XML, but older versions have some issues.
+            # This block should detect whether we need to encode or not
             try:
+                unicode()
                 print_('\n'.join(serverList).encode('utf-8', 'ignore'))
+            except NameError:
+                print_('\n'.join(serverList))
             except IOError:
                 pass
             sys.exit(0)
@@ -458,8 +564,16 @@ def speedtest():
     _result['latency']  = '%(latency)s' % best
 
     if not args.simple:
-        print_('Hosted by %(sponsor)s (%(name)s) [%(d)0.2f km]: '
-               '%(latency)s ms' % best)
+        # Python 2.7 and newer seem to be ok with the resultant encoding
+        # from parsing the XML, but older versions have some issues.
+        # This block should detect whether we need to encode or not
+        try:
+            unicode()
+            print_(('Hosted by %(sponsor)s (%(name)s) [%(d)0.2f km]: '
+                   '%(latency)s ms' % best).encode('utf-8', 'ignore'))
+        except NameError:
+            print_('Hosted by %(sponsor)s (%(name)s) [%(d)0.2f km]: '
+                   '%(latency)s ms' % best)
     else:
         print_('Ping: %(latency)s ms' % best)
 
@@ -500,6 +614,9 @@ def speedtest():
         ping = int(round(best['latency'], 0))
         ulspeedk = int(round((ulspeed / 1000) * 8, 0))
 
+        # Build the request to send results back to speedtest.net
+        # We use a list instead of a dict because the API expects parameters
+        # in a certain order
         apiData = [
             'download=%s' % dlspeedk,
             'ping=%s' % ping,
@@ -542,6 +659,7 @@ def main():
         speedtest()
     except KeyboardInterrupt:
         print_('\nCancelling...')
+
 
 if __name__ == '__main__':
     main()
