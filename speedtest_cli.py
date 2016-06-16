@@ -728,6 +728,8 @@ def speedtest():
 
     _result['download']  = '%0.2f' % ((dlspeed / 1000 / 1000) * 8)
 
+    _result['download']  = '%0.2f' % ((dlspeed / 1000 / 1000) * 8)
+
     sizesizes = [int(.25 * 1000 * 1000), int(.5 * 1000 * 1000)]
     sizes = []
     for size in sizesizes:
@@ -740,6 +742,8 @@ def speedtest():
         print_()
     print_('Upload: %0.2f M%s/s' %
            ((ulspeed / 1000 / 1000) * args.units[1], args.units[0]))
+
+    _result['upload']  = '%0.2f' % ((ulspeed / 1000 / 1000) * 8)
 
     _result['upload']  = '%0.2f' % ((ulspeed / 1000 / 1000) * 8)
 
@@ -791,6 +795,8 @@ def speedtest():
 
         print_('Share results: %s://www.speedtest.net/result/%s.png' %
                (scheme, resultid[0]))
+
+    return _result
 
     return _result
 
